@@ -125,6 +125,9 @@ def train(train_data_iterator, model, optimizer, criterion, epochs, device):
             optimizer.step()
 
             total_loss += loss.item()
+            
+            if num_steps%10 == 0:
+                logger.info("Loss at Step {} is {}".format(num_steps+1, loss.item()))
 
         losses.append(total_loss)
         logger.info("Loss is : {}".format(total_loss))
