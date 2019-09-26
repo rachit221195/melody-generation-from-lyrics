@@ -106,3 +106,6 @@ venv.bak/
 data/
 output/
 model/
+
+.DS_Store
+.idea/
