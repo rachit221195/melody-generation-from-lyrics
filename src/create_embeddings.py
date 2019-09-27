@@ -15,7 +15,7 @@ import src.utils.logger as logger
 class LyricsNGramsDataset(data.Dataset):
     filepath = Path(__file__).absolute()
     base_dir = filepath.parents[1]
-    data_dir = base_dir / 'data' / 'raw' / 'lmd-full_and_reddit_MIDI_dataset'
+    data_dir = base_dir / 'data' / 'raw'
     syllable_level_dir = data_dir / 'syllable_level_npy_39'
 
     def __init__(self, ngram=3):
@@ -29,13 +29,13 @@ class LyricsNGramsDataset(data.Dataset):
         for i, f_name in enumerate(f_names):
             f_data = np.load(f_name, allow_pickle=True)
             lyrics = f_data[0][2]
-            lyrics = lyrics[:100]
+#             lyrics = lyrics[:100]
             f_ngrams = self.generate_ngrams(lyrics, ngram)
             ngrams.extend(f_ngrams)
             vocab = vocab.union(lyrics)
             if i%999 == 0:
                 logger.info("Completed reading {} files in dataloader".format(i+1))
-            break
+#             break
 
         self.ngrams = ngrams
         self.vocab = vocab
@@ -126,7 +126,7 @@ def train(train_data_iterator, model, optimizer, criterion, epochs, device):
 
             total_loss += loss.item()
             
-            if num_steps%10 == 0:
+            if num_steps%50 == 0:
                 logger.info("Loss at Step {} is {}".format(num_steps+1, loss.item()))
 
         losses.append(total_loss)
@@ -156,7 +156,7 @@ def main():
     logger.info("Using {} device".format(device))
 
     # Dataloader params
-    data_params = {'batch_size': 100,
+    data_params = {'batch_size': 20000,
                    'shuffle': True,
                    'num_workers': 4}
     logger.info("Data Parameters used are: {}".format(data_params))
@@ -164,12 +164,12 @@ def main():
     # Model params
     ngrams = 3
     context_size = ngrams - 1
-    embedding_dim = 64
-    hidden_dim = 128
+    embedding_dim = 128
+    hidden_dim = 256
     logger.info("Model Parameters used are: NGrams-{}, ContextSize-{}, EmbeddingsDim-{}, HiddenDim-{}".format(ngrams, context_size, embedding_dim, hidden_dim))
 
     # Training params
-    epochs = 4
+    epochs = 500
     learning_rate = 0.001
     logger.info("Training Parameters are: Epochs-{}, LearningRate-{}".format(epochs, learning_rate))
 
@@ -223,6 +223,8 @@ def main():
     logger.info("Saving vocabulary lookup to {}".format(vocab_fpath))
     with open(vocab_fpath, 'w') as fp:
         json.dump(vocab_lookup, fp)
+    
+    logger.info("Completed creating embeddings")
 
 
 if __name__ == '__main__':
