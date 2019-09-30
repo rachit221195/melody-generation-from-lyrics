@@ -35,18 +35,16 @@ class LyricsNGramsDataset(data.Dataset):
             f_ngrams = self.generate_ngrams(lyrics, ngram)
             ngrams.extend(f_ngrams)
             vocab = vocab.union(lyrics)
-
-            if i == 10:
-                break
-
-            if i%999 == 0:
+            # if i == 10:
+            #     break
+            if (i+1) % 1000 == 0:
                 logger.info("Completed reading {} files in dataloader".format(i+1))
 #             break
 
         self.ngrams = ngrams
-        self.vocab = vocab
+        self.vocab = sorted(vocab)
         self.vocab_size = len(self.vocab)
-        self.word_to_ix = {word: i for i, word in enumerate(vocab)}
+        self.word_to_ix = {word: i for i, word in enumerate(self.vocab)}
 
         logger.info("Creating n-grams")
         idx_ngrams = [[self.word_to_ix[w] for w in ngram] for ngram in ngrams]
@@ -108,7 +106,7 @@ class LossCompute(object):
 
 
 def save_checkpoint(state, is_best, checkpoint_dir, best_model_dir):
-    f_path = checkpoint_dir / 'skipgram_embeddings_checkpoint2.pt'
+    f_path = checkpoint_dir / 'skipgram_embeddings_checkpoint.pt'
     logger.info("Saving checkpoint to {}".format(f_path))
     torch.save(state, f_path)
     if is_best:
@@ -117,28 +115,27 @@ def save_checkpoint(state, is_best, checkpoint_dir, best_model_dir):
         shutil.copyfile(f_path, best_fpath)
 
 
-def load_checkpoint(checkpoint_fpath):
+def load_checkpoint(checkpoint_fpath, model, optimizer):
     checkpoint = torch.load(checkpoint_fpath)
-    print(checkpoint['epoch'])
-    model = checkpoint['model']
     model.load_state_dict(checkpoint['state_dict'])
-    optimizer = checkpoint['optimizer']
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    logger.info("Checkpoint loaded successfully from {}".format(checkpoint_fpath))
     return model, optimizer, checkpoint['epoch']
 
 
-def train(train_data_iterator, model, model_dummy, optimizer, optimizer_dummy, criterion, start_epoch, epochs, loss_threshold, device, checkpoint_dir, model_dir):
+def train(train_data_iterator, model, optimizer, criterion, start_epoch, epochs, loss_threshold, device, checkpoint_dir, model_dir, save_every, print_every):
     prev_loss = 100000000
     is_best = False
     to_break = False
     losses = []
 
-    total_epochs = start_epoch + epochs
+    epochs = start_epoch + epochs
 
-    # TODO: Handle epoch number correctly. Coz they are to be saved in checkpoints
-    for epoch in range(start_epoch, total_epochs+start_epoch):
+    for epoch in range(start_epoch, epochs):
         model.train()
-        print("Running epoch {} / {}".format(epoch+1, epochs))
+        if (epoch + 1) % print_every == 0:
+            print("Running epoch {} / {}".format(epoch+1, epochs))
+
         logger.info("Running epoch {} / {}".format(epoch + 1, epochs))
         total_loss = 0
 
@@ -158,15 +155,14 @@ def train(train_data_iterator, model, model_dummy, optimizer, optimizer_dummy, c
             optimizer.step()
 
             total_loss += loss.item()
-            
-            # if num_steps%50 == 0:
-            #     logger.info("Loss at Step {} is {}".format(num_steps+1, loss.item()))
 
         losses.append(total_loss)
         logger.info("Loss is : {}".format(total_loss))
-        print("Loss is : {}".format(total_loss))
 
-        loss_change =  prev_loss - total_loss
+        if (epoch+1) % print_every == 0:
+            print("Loss is : {}".format(total_loss))
+
+        loss_change = prev_loss - total_loss
         logger.info("Change in loss is: {}".format(loss_change))
         if loss_change > 0:
             is_best = True
@@ -175,14 +171,12 @@ def train(train_data_iterator, model, model_dummy, optimizer, optimizer_dummy, c
 
         prev_loss = total_loss
 
-        if (epoch+1) % 1 == 0:
+        if (epoch+1) % save_every == 0:
             logger.info("Creating checkpoint at epoch {}".format(epoch+1))
             checkpoint = {
                 'epoch': epoch + 1,
-                'model': model_dummy,
-                'optimizer': optimizer_dummy,
                 'state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict()
+                'optimizer': optimizer.state_dict()
             }
             save_checkpoint(checkpoint, is_best, checkpoint_dir, model_dir)
             logger.info("Checkpoint created")
@@ -236,10 +230,15 @@ def main():
 
     # Training params
     start_epoch = 0
-    epochs = 50
-    loss_threshold = 0.00001
+    epochs = 50000
+    loss_threshold = 0.001
     learning_rate = 0.001
     logger.info("Training Parameters are: Epochs-{}, LossThreshold-{}, LearningRate-{}".format(epochs, loss_threshold, learning_rate))
+
+    save_every = 10
+    print_every = 10
+    logger.info("Saving Checkpoint every {} epochs".format(save_every))
+    logger.info("Printing Epoch Loss every {} epochs".format(print_every))
 
     logger.info("Creating the dataloader")
     training_set = LyricsNGramsDataset(ngrams)
@@ -248,19 +247,16 @@ def main():
     vocab_size = training_set.vocab_size
     logger.info("Vocabulary size is: {}".format(vocab_size))
 
+    logger.info("Initializing the model")
+    model = LyricsEmbeddings(vocab_size, embedding_dim, context_size, hidden_dim)
+    logger.info("Initializing the optimizer")
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
     if args.checkpoint_fname:
         logger.info("Initializing the model and optimizer")
-        logger.info("Loading model from the state dict")
+        logger.info("Loading model from the checkpoint")
         checkpoint_fpath = checkpoint_dir / args.checkpoint_fname
-        model, optimizer, start_epoch = load_checkpoint(checkpoint_fpath)
-    else:
-        logger.info("Initializing the model")
-        model = LyricsEmbeddings(vocab_size, embedding_dim, context_size, hidden_dim)
-        logger.info("Initializing the optimizer")
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-    model_dummy = LyricsEmbeddings(vocab_size, embedding_dim, context_size, hidden_dim)
-    optimizer_dummy = optim.Adam(model.parameters(), lr=learning_rate)
+        model, optimizer, start_epoch = load_checkpoint(checkpoint_fpath, model, optimizer)
 
     logger.info("{}".format(model))
 
@@ -271,7 +267,7 @@ def main():
     criterion = LossCompute()
 
     logger.info("Entering the training loop")
-    train(train_data_iterator, model, model_dummy, optimizer, optimizer_dummy, criterion, start_epoch, epochs, loss_threshold, device, checkpoint_dir, model_dir)
+    train(train_data_iterator, model, optimizer, criterion, start_epoch, epochs, loss_threshold, device, checkpoint_dir, model_dir, save_every, print_every)
 
     embedding_vec = model.embeddings.weight.data
     vocab_lookup = training_set.word_to_ix
@@ -300,7 +296,7 @@ def main():
     logger.info("Saving vocabulary lookup to {}".format(vocab_fpath))
     with open(vocab_fpath, 'w') as fp:
         json.dump(vocab_lookup, fp)
-    
+
     logger.info("Completed creating embeddings")
 
 
