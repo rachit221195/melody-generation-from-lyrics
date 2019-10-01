@@ -57,7 +57,7 @@ class LyricsNGramsDataset(data.Dataset):
 #             if i == 10:
 #                 break
             if (i+1) % 1000 == 0:
-                logger.info("Completed reading {} word level files in dataloader")
+                logger.info("Completed reading {} word level files in dataloader".format(i+1)
 
         self.ngrams = ngrams
         self.vocab = sorted(vocab)
