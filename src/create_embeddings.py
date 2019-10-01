@@ -161,17 +161,19 @@ def train(train_data_iterator, model, optimizer, criterion, start_epoch, epochs,
 
         if (epoch+1) % print_every == 0:
             print("Loss is : {}".format(total_loss))
-
-        loss_change = prev_loss - total_loss
-        logger.info("Change in loss is: {}".format(loss_change))
-        if loss_change > 0:
-            is_best = True
-        if loss_change < loss_threshold:
-            to_break = True
-
-        prev_loss = total_loss
+            
 
         if (epoch+1) % save_every == 0:
+            
+            loss_change = prev_loss - total_loss
+            logger.info("Change in loss after {} epochs is: {}".format(save_every, loss_change))
+            if loss_change > 0:
+                is_best=True
+            if loss_change < loss_threshold:
+                to_break=True
+                
+            prev_loss = total_loss
+            
             logger.info("Creating checkpoint at epoch {}".format(epoch+1))
             checkpoint = {
                 'epoch': epoch + 1,
@@ -231,7 +233,7 @@ def main():
     # Training params
     start_epoch = 0
     epochs = 50000
-    loss_threshold = 0.001
+    loss_threshold = 0.00001
     learning_rate = 0.001
     logger.info("Training Parameters are: Epochs-{}, LossThreshold-{}, LearningRate-{}".format(epochs, loss_threshold, learning_rate))
 
@@ -257,7 +259,13 @@ def main():
         logger.info("Loading model from the checkpoint")
         checkpoint_fpath = checkpoint_dir / args.checkpoint_fname
         model, optimizer, start_epoch = load_checkpoint(checkpoint_fpath, model, optimizer)
-
+        
+        logger.info("Moving optimizer buffer to Device as well.")
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.cuda()
+    
     logger.info("{}".format(model))
 
     logger.info("Transfering model to {}".format(device))
