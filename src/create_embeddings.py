@@ -39,8 +39,8 @@ class LyricsNGramsDataset(data.Dataset):
             f_ngrams = self.generate_ngrams(lyrics, ngram)
             ngrams.extend(f_ngrams)
             vocab = vocab.union(lyrics)
-            if i == 10:
-                break
+#             if i == 10:
+#                 break
             if (i+1) % 1000 == 0:
                 logger.info("Completed reading {} syllable level files in dataloader".format(i+1))
 #             break
@@ -54,8 +54,8 @@ class LyricsNGramsDataset(data.Dataset):
             f_ngrams = self.generate_ngrams(lyrics, ngram)
             ngrams.extend(f_ngrams)
             vocab = vocab.union(lyrics)
-            if i == 10:
-                break
+#             if i == 10:
+#                 break
             if (i+1) % 1000 == 0:
                 logger.info("Completed reading {} word level files in dataloader")
 
