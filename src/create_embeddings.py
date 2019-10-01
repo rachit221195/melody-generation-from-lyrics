@@ -19,27 +19,45 @@ class LyricsNGramsDataset(data.Dataset):
     base_dir = filepath.parents[1]
     data_dir = base_dir / 'data' / 'raw'
     syllable_level_dir = data_dir / 'syllable_level_npy_39'
+    word_level_dir = data_dir / 'word_level_29'
 
     def __init__(self, ngram=3):
-        # initialize the dataset by creating SkipGrap Data
+        # initialize the dataset by creating SkipGram Data
         # 1. Load in all the files
         # 2. Fetch out the lyrics from it
         # 3. Create n-grams as required
-        f_names = self.syllable_level_dir.iterdir()
+
         vocab = set()
         ngrams = []
-        for i, f_name in enumerate(f_names):
+
+        logger.info("Reading syllable level files")
+        syllable_f_names = self.syllable_level_dir.iterdir()
+        for i, f_name in enumerate(syllable_f_names):
             f_data = np.load(f_name, allow_pickle=True)
             lyrics = f_data[0][2]
 #             lyrics = lyrics[:100]
             f_ngrams = self.generate_ngrams(lyrics, ngram)
             ngrams.extend(f_ngrams)
             vocab = vocab.union(lyrics)
-            # if i == 10:
-            #     break
+            if i == 10:
+                break
             if (i+1) % 1000 == 0:
-                logger.info("Completed reading {} files in dataloader".format(i+1))
+                logger.info("Completed reading {} syllable level files in dataloader".format(i+1))
 #             break
+
+        logger.info("Reading word level files")
+        word_f_names = self.word_level_dir.iterdir()
+        for i, f_name in enumerate(word_f_names):
+            f_data = np.load(f_name, allow_pickle=True)
+            lyrics = f_data[0][2]
+            lyrics = [w[0] for w in lyrics]
+            f_ngrams = self.generate_ngrams(lyrics, ngram)
+            ngrams.extend(f_ngrams)
+            vocab = vocab.union(lyrics)
+            if i == 10:
+                break
+            if (i+1) % 1000 == 0:
+                logger.info("Completed reading {} word level files in dataloader")
 
         self.ngrams = ngrams
         self.vocab = sorted(vocab)
@@ -161,10 +179,8 @@ def train(train_data_iterator, model, optimizer, criterion, start_epoch, epochs,
 
         if (epoch+1) % print_every == 0:
             print("Loss is : {}".format(total_loss))
-            
 
         if (epoch+1) % save_every == 0:
-            
             loss_change = prev_loss - total_loss
             logger.info("Change in loss after {} epochs is: {}".format(save_every, loss_change))
             if loss_change > 0:
@@ -211,6 +227,8 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    today_date = str(date.today())
+
     init_config("info", "creating embeddings", log_dir / 'creating_embeddings.log')
 
     use_cuda = torch.cuda.is_available()
@@ -233,7 +251,7 @@ def main():
     # Training params
     start_epoch = 0
     epochs = 50000
-    loss_threshold = 0.00001
+    loss_threshold = 0.001
     learning_rate = 0.001
     logger.info("Training Parameters are: Epochs-{}, LossThreshold-{}, LearningRate-{}".format(epochs, loss_threshold, learning_rate))
 
@@ -248,6 +266,13 @@ def main():
 
     vocab_size = training_set.vocab_size
     logger.info("Vocabulary size is: {}".format(vocab_size))
+
+    vocab_lookup = training_set.word_to_ix
+    vocab_fname = '{}_vocabulary_lookup.json'.format(today_date)
+    vocab_fpath = out_dir / vocab_fname
+    logger.info("Saving vocabulary lookup to {}".format(vocab_fpath))
+    with open(vocab_fpath, 'w') as fp:
+        json.dump(vocab_lookup, fp)
 
     logger.info("Initializing the model")
     model = LyricsEmbeddings(vocab_size, embedding_dim, context_size, hidden_dim)
@@ -278,9 +303,6 @@ def main():
     train(train_data_iterator, model, optimizer, criterion, start_epoch, epochs, loss_threshold, device, checkpoint_dir, model_dir, save_every, print_every)
 
     embedding_vec = model.embeddings.weight.data
-    vocab_lookup = training_set.word_to_ix
-
-    today_date = str(date.today())
 
     model_fname = '{}_skipgram_embeddings_entire_model.pt'.format(today_date)
     model_fpath = model_dir / model_fname
@@ -298,12 +320,6 @@ def main():
     torch.save(embedding_vec, embeddings_fpath)
     # Loading the embeddings
     # embeddings_vec = torch.load(out_dir / embeddings_fname)
-
-    vocab_fname = '{}_vocabulary_lookup.json'.format(today_date)
-    vocab_fpath = out_dir / vocab_fname
-    logger.info("Saving vocabulary lookup to {}".format(vocab_fpath))
-    with open(vocab_fpath, 'w') as fp:
-        json.dump(vocab_lookup, fp)
 
     logger.info("Completed creating embeddings")
 
