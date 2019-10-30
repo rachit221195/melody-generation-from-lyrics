@@ -157,8 +157,9 @@ class Dataloader(data.Dataset):
         lyrics_seq = self.lyrics_seq[i]
         cont_val_seq = self.cont_attr_seq[i]
         discrete_val_seq = self.discrete_attr_seq[i]
+        noise_seq = torch.rand(lyrics_seq.shape)
 
-        return lyrics_seq, cont_val_seq, discrete_val_seq
+        return lyrics_seq, cont_val_seq, discrete_val_seq, noise_seq
 
 
 class GeneratorLSTM(nn.Module):
@@ -169,16 +170,20 @@ class GeneratorLSTM(nn.Module):
         self.lstm = nn.LSTM(ff1_out, hidden_dim, num_layers=2)
         self.output_ff = nn.Linear(ff1_out, out_dim)
 
-    def forward(self, lyrics):
+    def forward(self, lyrics, noise):
         """
         Define forward pass
         1. Pass input (50 dim) through FF1 layer to explode the dimension
         2. Pass the entire sequence through
         :return:
         """
-        #TODO: Reshaping would be required everywhere!
-        # expecting lyrics with noise added?!?
-        out1 = F.relu(self.input_ff(lyrics))
+        # print("Input size {}".format(lyrics.shape))
+        # Reshaping input is not required.
+        # pytorch automatically applys the linear layer to only the last dimension!
+        concat_lyrics = torch.cat((lyrics, noise), 2)
+        print("Concat Shape: {}".format(concat_lyrics.shape))
+        out1 = F.relu(self.input_ff(concat_lyrics))
+        # print("Output size of first layer {}".format(out1.shape))
         # print(out1.shape)
         # lstm_out, _ = self.lstm(out1)
         # The input to LSTM needs to be reshaped.
@@ -198,8 +203,9 @@ class DiscriminatorLSTM(nn.Module):
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=2)
         self.out = nn.Linear(hidden_dim, out_dim)
 
-    def forward(self, input):
-        _, lstm_out = self.lstm(input.view(input.shape[1], input.shape[0], -1))
+    def forward(self, input, lyrics):
+        concat_input = torch.cat((input, lyrics), 2)
+        _, lstm_out = self.lstm(concat_input.view(concat_input.shape[1], concat_input.shape[0], -1))
         ct = lstm_out[1]
         # print(ct.shape)
         # print(ct[-1])
@@ -212,6 +218,87 @@ class DiscriminatorLSTM(nn.Module):
         # print(out)
 
 
+def train_conditional_gan():
+    """
+    Run training loop in epochs.
+    In one epoch, have certain number of steps for which you optimize for Discriminator
+    Then have one step for
+    :return:
+    """
+
+    for epoch in range(start_epoch, epochs):
+        discriminator.train()
+
+        # if (epoch + 1) % print_every == 0:
+        #     print("Running epoch {} / {}".format(epoch + 1, epochs))
+        #
+        # logger.info("Running epoch {} / {}".format(epoch + 1, epochs))
+        total_loss = 0
+
+        for num_steps, data in enumerate(train_data_iterator):
+            lyrics_seq = data[0].to(device)
+            cont_val_seq = data[1].to(device)
+            discrete_val_seq = data[2].to(device)
+            noise_seq = data[3].to(device)
+
+            optimizer_G.zero_grad()
+            optimizer_D.zero_grad()
+
+            gen_out = generator(lyrics_seq, noise_seq)
+            fake_dis_out = discriminator(gen_out, lyrics_seq)
+            true_dis_out = discriminator(discrete_val_seq, lyrics_seq)
+
+            fake_loss = criterion_D(fake_dis_out, fake_val)
+            true_loss = criterion_D(true_dis_out, true_val)
+
+            # Read this. But whyyy?
+            discriminator_loss = (fake_loss + true_loss) / 2
+            discriminator_loss.backward()
+            optimizer_D.step()
+            # print(loss)
+            # print(type(loss))
+
+            # TODO - Check till here
+            # TODO - Write code to train generator!
+            # TODO - Happy Data Sciencing! <3
+
+            total_loss += loss.item()
+
+        losses.append(total_loss)
+        logger.info("Loss is : {}".format(total_loss))
+
+        if (epoch + 1) % print_every == 0:
+            print("Loss is : {}".format(total_loss))
+
+        if (epoch + 1) % save_every == 0:
+            loss_change = prev_loss - total_loss
+            logger.info(
+                "Change in loss after {} epochs is: {}".format(save_every,
+                                                               loss_change))
+            if loss_change > 0:
+                is_best = True
+            if loss_change < loss_threshold:
+                to_break = True
+
+            prev_loss = total_loss
+
+            logger.info("Creating checkpoint at epoch {}".format(epoch + 1))
+            checkpoint = {
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict()
+            }
+            save_checkpoint(checkpoint, is_best, checkpoint_dir, model_dir)
+            logger.info("Checkpoint created")
+
+        if to_break:
+            logger.info(
+                "Change in loss is less than the threshold. Stopping training")
+            break
+
+    logger.info("Completed Training")
+
+
 if __name__ == '__main__':
     data_params = {'batch_size': 8,
                    'shuffle': True,
@@ -221,23 +308,24 @@ if __name__ == '__main__':
     training_set = Dataloader('2019-09-26_embeddings_vector.pt', '2019-09-26_vocabulary_lookup.json', sequence_len)
     train_data_iterator = data.DataLoader(training_set, **data_params)
 
-    generator = GeneratorLSTM(10, 20, 20, 3)
-    discriminator = DiscriminatorLSTM(3, 20, 1)
+    generator = GeneratorLSTM(20, 40, 40, 3)
+    discriminator = DiscriminatorLSTM(13, 40, 1)
 
     for i, data in enumerate(train_data_iterator):
         lyrics_seq = data[0]
         cont_val_seq = data[1]
         discrete_val_seq = data[2]
+        noise_seq = data[3]
         print("Lyrics sequence is: {}".format(lyrics_seq.shape))
         print("Content Value Sequence is: {}".format(cont_val_seq.shape))
         print("Discrete value sequence is: {}".format(discrete_val_seq.shape))
 
         print(len(lyrics_seq))
 
-        generator.zero_grad()
-        discriminator.zero_grad()
-        gen_out = generator(lyrics_seq)
+        # generator.zero_grad()
+        # discriminator.zero_grad()
+        gen_out = generator(lyrics_seq, noise_seq)
 
-        discriminator(gen_out)
+        discriminator(gen_out, lyrics_seq)
 
         break
