@@ -7,6 +7,7 @@ import shutil
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.autograd import Variable
 import torch.optim as optim
 from torch.utils import data
 import json
@@ -218,83 +219,152 @@ class DiscriminatorLSTM(nn.Module):
         # print(out)
 
 
-def train_conditional_gan():
+def ones_target(size):
+    '''
+    Tensor containing ones, with shape = size
+    '''
+    data = Variable(torch.ones(size))
+    return data
+
+
+def zeros_target(size):
+    '''
+    Tensor containing zeros, with shape = size
+    '''
+    data = Variable(torch.zeros(size))
+    return data
+
+
+class LossCompute(object):
+    def __init__(self):
+        self.criterion = nn.BCELoss()
+
+    def __call__(self, x, y):
+        """
+        Call to compute loss
+        :param x: predicted value
+        :param y: actual value
+        :return:
+        """
+        loss = self.criterion(x, y)
+        return loss
+
+
+def train_conditional_gan(train_data_iterator, generator, discriminator, optimizer_G, optimizer_D, criterion, start_epoch, epochs, loss_threshold, device, checkpoint_dir, model_dir, save_every, print_every, train_D_steps, train_G_steps):
     """
     Run training loop in epochs.
     In one epoch, have certain number of steps for which you optimize for Discriminator
     Then have one step for
     :return:
     """
-
     for epoch in range(start_epoch, epochs):
+
+        losses_G = []
+        losses_D = []
+
         discriminator.train()
+        generator.train()
 
         # if (epoch + 1) % print_every == 0:
         #     print("Running epoch {} / {}".format(epoch + 1, epochs))
         #
         # logger.info("Running epoch {} / {}".format(epoch + 1, epochs))
-        total_loss = 0
 
-        for num_steps, data in enumerate(train_data_iterator):
+        # Train discriminator for train_D_steps
+        total_D_loss = 0
+        for num_steps_D, data in enumerate(train_data_iterator):
+            # Segregating data
+            lyrics_seq = data[0].to(device)
+            cont_val_seq = data[1].to(device)
+            discrete_val_seq = data[2].to(device)
+            noise_seq = data[3].to(device)
+
+            optimizer_D.zero_grad()
+
+            # Train on fake data
+            fake_G_out = generator(lyrics_seq, noise_seq).detach() #detach to avoid training G on these labels
+            fake_D_out = discriminator(fake_G_out, lyrics_seq)
+            fake_val = zeros_target(fake_D_out.shape)
+            fake_D_loss = criterion(fake_D_out, fake_val)
+            fake_D_loss.backward()
+
+            # Train on real data
+            true_D_out = discriminator(discrete_val_seq, lyrics_seq)
+            true_val = zeros_target(true_D_out.shape)
+            true_D_loss = criterion(true_D_out, true_val)
+            true_D_loss.backward()
+
+            optimizer_D.step()
+
+            total_D_loss += ((true_D_loss.item() + true_D_loss.item())/2)
+            # print(loss)
+            # print(type(loss))
+
+            if num_steps_D == train_D_steps:
+                break
+
+        losses_D.append((total_D_loss))
+
+        print("Loss while training discriminator is: {}".format(total_D_loss))
+
+
+        # Train Generator for train_G_steps
+        total_G_loss = 0
+        for num_steps_G, data in enumerate(train_data_iterator):
             lyrics_seq = data[0].to(device)
             cont_val_seq = data[1].to(device)
             discrete_val_seq = data[2].to(device)
             noise_seq = data[3].to(device)
 
             optimizer_G.zero_grad()
-            optimizer_D.zero_grad()
 
-            gen_out = generator(lyrics_seq, noise_seq)
-            fake_dis_out = discriminator(gen_out, lyrics_seq)
-            true_dis_out = discriminator(discrete_val_seq, lyrics_seq)
+            fake_G_out = generator(lyrics_seq, noise_seq)
+            fake_D_out = discriminator(fake_G_out, lyrics_seq)
+            true_val = ones_target(fake_D_out.shape)
+            fake_G_loss = criterion(fake_D_out, true_val)
 
-            fake_loss = criterion_D(fake_dis_out, fake_val)
-            true_loss = criterion_D(true_dis_out, true_val)
+            fake_G_loss.backward()
+            optimizer_G.step()
 
-            # Read this. But whyyy?
-            discriminator_loss = (fake_loss + true_loss) / 2
-            discriminator_loss.backward()
-            optimizer_D.step()
-            # print(loss)
-            # print(type(loss))
+            total_G_loss += fake_G_loss.item()
 
-            # TODO - Check till here
-            # TODO - Write code to train generator!
-            # TODO - Happy Data Sciencing! <3
+            if num_steps_G == train_G_steps:
+                break
 
-            total_loss += loss.item()
+        losses_G.append(total_G_loss)
 
-        losses.append(total_loss)
-        logger.info("Loss is : {}".format(total_loss))
+        print("Loss while training generator is: {}".format(total_G_loss))
 
-        if (epoch + 1) % print_every == 0:
-            print("Loss is : {}".format(total_loss))
+        # logger.info("Loss is : {}".format(total_loss))
+        #
+        # if (epoch + 1) % print_every == 0:
+        #     print("Loss is : {}".format(total_loss))
 
-        if (epoch + 1) % save_every == 0:
-            loss_change = prev_loss - total_loss
-            logger.info(
-                "Change in loss after {} epochs is: {}".format(save_every,
-                                                               loss_change))
-            if loss_change > 0:
-                is_best = True
-            if loss_change < loss_threshold:
-                to_break = True
+        # if (epoch + 1) % save_every == 0:
+        #     loss_change = prev_loss - total_loss
+        #     logger.info(
+        #         "Change in loss after {} epochs is: {}".format(save_every,
+        #                                                        loss_change))
+        #     if loss_change > 0:
+        #         is_best = True
+        #     if loss_change < loss_threshold:
+        #         to_break = True
+        #
+        #     prev_loss = total_loss
+        #
+        #     logger.info("Creating checkpoint at epoch {}".format(epoch + 1))
+        #     checkpoint = {
+        #         'epoch': epoch + 1,
+        #         'state_dict': model.state_dict(),
+        #         'optimizer': optimizer.state_dict()
+        #     }
+        #     save_checkpoint(checkpoint, is_best, checkpoint_dir, model_dir)
+        #     logger.info("Checkpoint created")
 
-            prev_loss = total_loss
-
-            logger.info("Creating checkpoint at epoch {}".format(epoch + 1))
-            checkpoint = {
-                'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
-                'optimizer': optimizer.state_dict()
-            }
-            save_checkpoint(checkpoint, is_best, checkpoint_dir, model_dir)
-            logger.info("Checkpoint created")
-
-        if to_break:
-            logger.info(
-                "Change in loss is less than the threshold. Stopping training")
-            break
+        # if to_break:
+        #     logger.info(
+        #         "Change in loss is less than the threshold. Stopping training")
+        #     break
 
     logger.info("Completed Training")
 
@@ -304,6 +374,9 @@ if __name__ == '__main__':
                    'shuffle': True,
                    'num_workers': 1}
 
+    # TODO: This
+    learning_rate = 0.01
+
     sequence_len = 5
     training_set = Dataloader('2019-09-26_embeddings_vector.pt', '2019-09-26_vocabulary_lookup.json', sequence_len)
     train_data_iterator = data.DataLoader(training_set, **data_params)
@@ -311,21 +384,38 @@ if __name__ == '__main__':
     generator = GeneratorLSTM(20, 40, 40, 3)
     discriminator = DiscriminatorLSTM(13, 40, 1)
 
-    for i, data in enumerate(train_data_iterator):
-        lyrics_seq = data[0]
-        cont_val_seq = data[1]
-        discrete_val_seq = data[2]
-        noise_seq = data[3]
-        print("Lyrics sequence is: {}".format(lyrics_seq.shape))
-        print("Content Value Sequence is: {}".format(cont_val_seq.shape))
-        print("Discrete value sequence is: {}".format(discrete_val_seq.shape))
+    optimizer_G = optim.Adam(generator.parameters(), lr=learning_rate)
+    optimizer_D = optim.Adam(discriminator.parameters(), lr=learning_rate)
 
-        print(len(lyrics_seq))
+    criterion = LossCompute()
+    start_epoch = 0
+    epochs = 10
+    device = 'cpu'
+    train_D_steps = 20
+    train_G_steps = 20
 
-        # generator.zero_grad()
-        # discriminator.zero_grad()
-        gen_out = generator(lyrics_seq, noise_seq)
+    train_conditional_gan(train_data_iterator, generator, discriminator,
+                          optimizer_G, optimizer_D, criterion, start_epoch,
+                          epochs, 'loss_threshold', device, 'checkpoint_dir',
+                          'model_dir', 'save_every', 'print_every', train_D_steps,
+                          train_G_steps)
 
-        discriminator(gen_out, lyrics_seq)
+    # for i, data in enumerate(train_data_iterator):
+    #     lyrics_seq = data[0]
+    #     cont_val_seq = data[1]
+    #     discrete_val_seq = data[2]
+    #     noise_seq = data[3]
+    #     print("Lyrics sequence is: {}".format(lyrics_seq.shape))
+    #     print("Content Value Sequence is: {}".format(cont_val_seq.shape))
+    #     print("Discrete value sequence is: {}".format(discrete_val_seq.shape))
+    #
+    #     print(len(lyrics_seq))
+    #
+    #     # generator.zero_grad()
+    #     # discriminator.zero_grad()
+    #     gen_out = generator(lyrics_seq, noise_seq)
+    #
+    #     discriminator(gen_out, lyrics_seq)
+    #
+    #     break
 
-        break
