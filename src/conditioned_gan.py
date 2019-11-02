@@ -151,7 +151,7 @@ class Dataloader(data.Dataset):
         # , ,  = self.create_training_data()
 
     def __len__(self):
-        print(len(self.lyrics_seq))
+#         print(len(self.lyrics_seq))
         return len(self.lyrics_seq)
 
     def __getitem__(self, i):
@@ -182,7 +182,7 @@ class GeneratorLSTM(nn.Module):
         # Reshaping input is not required.
         # pytorch automatically applys the linear layer to only the last dimension!
         concat_lyrics = torch.cat((lyrics, noise), 2)
-        print("Concat Shape: {}".format(concat_lyrics.shape))
+#         print("Concat Shape: {}".format(concat_lyrics.shape))
         out1 = F.relu(self.input_ff(concat_lyrics))
         # print("Output size of first layer {}".format(out1.shape))
         # print(out1.shape)
@@ -215,6 +215,7 @@ class DiscriminatorLSTM(nn.Module):
         # print(last_layer_out.shape)
         out = torch.sigmoid(self.out(last_layer_out))
         out = out.view(out.shape[0], -1)
+        return out
         # print(out.shape)
         # print(out)
 
@@ -283,9 +284,16 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
 
             # Train on fake data
             fake_G_out = generator(lyrics_seq, noise_seq).detach() #detach to avoid training G on these labels
+#             print(fake_G_out)
+            
             fake_D_out = discriminator(fake_G_out, lyrics_seq)
+#             print(fake_D_out)
+            
             fake_val = zeros_target(fake_D_out.shape)
+#             print(fake_val)
+            
             fake_D_loss = criterion(fake_D_out, fake_val)
+#             print(fake_D_loss)
             fake_D_loss.backward()
 
             # Train on real data
@@ -366,7 +374,7 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
         #         "Change in loss is less than the threshold. Stopping training")
         #     break
 
-    logger.info("Completed Training")
+#     logger.info("Completed Training")
 
 
 if __name__ == '__main__':
@@ -378,7 +386,7 @@ if __name__ == '__main__':
     learning_rate = 0.01
 
     sequence_len = 5
-    training_set = Dataloader('2019-09-26_embeddings_vector.pt', '2019-09-26_vocabulary_lookup.json', sequence_len)
+    training_set = Dataloader('2019-09-27_embeddings_vector.pt', '2019-09-27_vocabulary_lookup.json', sequence_len)
     train_data_iterator = data.DataLoader(training_set, **data_params)
 
     generator = GeneratorLSTM(20, 40, 40, 3)
@@ -389,10 +397,10 @@ if __name__ == '__main__':
 
     criterion = LossCompute()
     start_epoch = 0
-    epochs = 10
+    epochs = 100
     device = 'cpu'
-    train_D_steps = 20
-    train_G_steps = 20
+    train_D_steps = 1
+    train_G_steps = 10
 
     train_conditional_gan(train_data_iterator, generator, discriminator,
                           optimizer_G, optimizer_D, criterion, start_epoch,
