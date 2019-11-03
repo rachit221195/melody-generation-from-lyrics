@@ -16,6 +16,7 @@ import src.utils.logger as logger
 
 
 class Dataloader(data.Dataset):
+    # TODO: In original paper they have taken disjoint sequences and not a sliding window!
     file_path = Path(__file__).absolute()
     base_dir = file_path.parents[1]
     embeddings_dir = base_dir / 'output'
@@ -284,19 +285,19 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
 
             # Train on fake data
             fake_G_out = generator(lyrics_seq, noise_seq).detach() #detach to avoid training G on these labels
-#             print(fake_G_out)
-            
+            print("Generated MIDI sequence is")
+            print(fake_G_out)
             fake_D_out = discriminator(fake_G_out, lyrics_seq)
 #             print(fake_D_out)
-            
             fake_val = zeros_target(fake_D_out.shape)
 #             print(fake_val)
-            
             fake_D_loss = criterion(fake_D_out, fake_val)
 #             print(fake_D_loss)
             fake_D_loss.backward()
 
             # Train on real data
+            print("True MIDI sequence is")
+            print(discrete_val_seq)
             true_D_out = discriminator(discrete_val_seq, lyrics_seq)
             true_val = zeros_target(true_D_out.shape)
             true_D_loss = criterion(true_D_out, true_val)
@@ -327,6 +328,9 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
             optimizer_G.zero_grad()
 
             fake_G_out = generator(lyrics_seq, noise_seq)
+            # print("Printing Generator output")
+            # print("Shape is: {}".format(fake_G_out.shape))
+            # print(fake_G_out)
             fake_D_out = discriminator(fake_G_out, lyrics_seq)
             true_val = ones_target(fake_D_out.shape)
             fake_G_loss = criterion(fake_D_out, true_val)
@@ -378,29 +382,30 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
 
 
 if __name__ == '__main__':
-    data_params = {'batch_size': 8,
+    data_params = {'batch_size': 2,
                    'shuffle': True,
                    'num_workers': 1}
 
     # TODO: This
-    learning_rate = 0.01
+    learning_rate_G = 0.5
+    learning_rate_D = 0.001
 
     sequence_len = 5
-    training_set = Dataloader('2019-09-27_embeddings_vector.pt', '2019-09-27_vocabulary_lookup.json', sequence_len)
+    training_set = Dataloader('2019-09-26_embeddings_vector.pt', '2019-09-26_vocabulary_lookup.json', sequence_len)
     train_data_iterator = data.DataLoader(training_set, **data_params)
 
     generator = GeneratorLSTM(20, 40, 40, 3)
     discriminator = DiscriminatorLSTM(13, 40, 1)
 
-    optimizer_G = optim.Adam(generator.parameters(), lr=learning_rate)
-    optimizer_D = optim.Adam(discriminator.parameters(), lr=learning_rate)
+    optimizer_G = optim.Adam(generator.parameters(), lr=learning_rate_G)
+    optimizer_D = optim.Adam(discriminator.parameters(), lr=learning_rate_D)
 
     criterion = LossCompute()
     start_epoch = 0
-    epochs = 100
+    epochs = 10
     device = 'cpu'
     train_D_steps = 1
-    train_G_steps = 10
+    train_G_steps = 1
 
     train_conditional_gan(train_data_iterator, generator, discriminator,
                           optimizer_G, optimizer_D, criterion, start_epoch,
@@ -426,4 +431,13 @@ if __name__ == '__main__':
     #     discriminator(gen_out, lyrics_seq)
     #
     #     break
+
+
+    """
+    Potential pitfalls in training GAN
+    1. Not using complete data
+    2. Generator is not reaching anywhere with this. Discriminator overpowers
+    3. In our specific case, the outputs are supposed to be in a particular format.
+       Get closer to that format by doing some modifications to the output.
+    """
 
