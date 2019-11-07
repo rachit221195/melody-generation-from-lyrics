@@ -24,10 +24,10 @@ class Dataloader(data.Dataset):
 
     def read_file(self, f_path):
         f_data = np.load(f_path, allow_pickle=True)
-        cont_attributes = f_data[0][0][:100]
-        discrete_attributes = f_data[0][1][:100]
-        # lyrics = f_data[0][2]
-        lyrics = f_data[0][2][:100]
+        cont_attributes = f_data[0][0]
+        discrete_attributes = f_data[0][1]
+        lyrics = f_data[0][2]
+#         lyrics = f_data[0][2][:100]
 
         # print(type(cont_attributes))
         # print(cont_attributes)
@@ -119,7 +119,7 @@ class Dataloader(data.Dataset):
     def __init__(self, embeddings_fname, vocab_fname, seq_len):
         embeddings_vec = torch.load(self.embeddings_dir/ embeddings_fname)
         # TODO: Comment out the line below.
-        embeddings_vec = embeddings_vec[:, :10]
+#         embeddings_vec = embeddings_vec[:, :10]
         self.embeddings_vec = embeddings_vec.tolist()
         # print(self.embeddings_vec)
         with open(self.embeddings_dir / vocab_fname, 'r') as fp:
@@ -159,6 +159,7 @@ class Dataloader(data.Dataset):
         lyrics_seq = self.lyrics_seq[i]
         cont_val_seq = self.cont_attr_seq[i]
         discrete_val_seq = self.discrete_attr_seq[i]
+        #TODO: Add noise shape as a parameter in the class
         noise_seq = torch.rand(lyrics_seq.shape)
 
         return lyrics_seq, cont_val_seq, discrete_val_seq, noise_seq
@@ -182,6 +183,10 @@ class GeneratorLSTM(nn.Module):
         # print("Input size {}".format(lyrics.shape))
         # Reshaping input is not required.
         # pytorch automatically applys the linear layer to only the last dimension!
+        
+        
+#         print("Shape of input lyrics is: {}".format(lyrics.shape))
+#         print("Shape of noise is: {}".format(noise.shape))
         concat_lyrics = torch.cat((lyrics, noise), 2)
 #         print("Concat Shape: {}".format(concat_lyrics.shape))
         out1 = F.relu(self.input_ff(concat_lyrics))
@@ -285,21 +290,23 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
 
             # Train on fake data
             fake_G_out = generator(lyrics_seq, noise_seq).detach() #detach to avoid training G on these labels
-            print("Generated MIDI sequence is")
-            print(fake_G_out)
+#             print("Generated MIDI sequence is")
+#             print(fake_G_out)
             fake_D_out = discriminator(fake_G_out, lyrics_seq)
 #             print(fake_D_out)
             fake_val = zeros_target(fake_D_out.shape)
+            fake_val = fake_val.to(device)
 #             print(fake_val)
             fake_D_loss = criterion(fake_D_out, fake_val)
 #             print(fake_D_loss)
             fake_D_loss.backward()
 
             # Train on real data
-            print("True MIDI sequence is")
-            print(discrete_val_seq)
+#             print("True MIDI sequence is")
+#             print(discrete_val_seq)
             true_D_out = discriminator(discrete_val_seq, lyrics_seq)
             true_val = zeros_target(true_D_out.shape)
+            true_val = true_val.to(device)
             true_D_loss = criterion(true_D_out, true_val)
             true_D_loss.backward()
 
@@ -333,6 +340,7 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
             # print(fake_G_out)
             fake_D_out = discriminator(fake_G_out, lyrics_seq)
             true_val = ones_target(fake_D_out.shape)
+            true_val = true_val.to(device)
             fake_G_loss = criterion(fake_D_out, true_val)
 
             fake_G_loss.backward()
@@ -382,28 +390,49 @@ def train_conditional_gan(train_data_iterator, generator, discriminator, optimiz
 
 
 if __name__ == '__main__':
-    data_params = {'batch_size': 2,
+    
+    use_cuda = torch.cuda.is_available()
+    device = torch.device('cuda:0' if use_cuda else 'cpu')
+    
+#     device = 'cpu'
+    
+    data_params = {'batch_size': 100,
                    'shuffle': True,
-                   'num_workers': 1}
+                   'num_workers': 6}
 
     # TODO: This
-    learning_rate_G = 0.5
-    learning_rate_D = 0.001
+    learning_rate_G = 0.1
+    learning_rate_D = 0.0001
 
-    sequence_len = 5
-    training_set = Dataloader('2019-09-26_embeddings_vector.pt', '2019-09-26_vocabulary_lookup.json', sequence_len)
+    sequence_len = 20 
+    training_set = Dataloader('2019-10-01_embeddings_vector.pt', '2019-10-01_vocabulary_lookup.json', sequence_len)
     train_data_iterator = data.DataLoader(training_set, **data_params)
 
-    generator = GeneratorLSTM(20, 40, 40, 3)
-    discriminator = DiscriminatorLSTM(13, 40, 1)
+    
+    embed_dim = 128
+    lyrics_dim = 2*embed_dim
+    ff1_out = 400
+    hidden_dim = 400
+    generator_out_dim = 3
+    
+    discriminator_input_dim = embed_dim + generator_out_dim
+    discriminator_out_dim = 1
+    
+    generator = GeneratorLSTM(lyrics_dim, ff1_out, hidden_dim, generator_out_dim)
+    discriminator = DiscriminatorLSTM(discriminator_input_dim, hidden_dim, discriminator_out_dim)
+    
+    generator = generator.to(device)
+    discriminator = discriminator.to(device)
 
     optimizer_G = optim.Adam(generator.parameters(), lr=learning_rate_G)
     optimizer_D = optim.Adam(discriminator.parameters(), lr=learning_rate_D)
+    
+#     optimizer_G.to(device)
+#     optimizer_D.to(device)
 
     criterion = LossCompute()
     start_epoch = 0
-    epochs = 10
-    device = 'cpu'
+    epochs = 50
     train_D_steps = 1
     train_G_steps = 1
 
